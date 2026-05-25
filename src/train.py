@@ -11,31 +11,36 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-FIG_DIR = Path("/content/drive/MyDrive/cuffless-bp-pulsedb/figures")
-metrics_path = Path("/content/drive/MyDrive/cuffless-bp-pulsedb/results/model_metrics.csv")
 
-def plot_true_vs_pred(test, pred, model_name, split_name, variable_name):
+def clean_filename(text):
+    return str(text).replace(" ", "_").replace("/", "_")
+
+def plot_true_vs_pred(test, pred, model_name, split_name, variable_name, fig_dir=None):
   plt.figure(figsize=(6,6))
   plt.scatter(test, pred, alpha=0.3, s=8)
   plt.plot([min(test), max(test)], [min(test), max(test)], 'r--')  # y=x line
   plt.xlabel('True')
   plt.ylabel('Predicted')
-  plt.title(f"True vs. Predicted {model_name}_{variable_name}_{split_name}")
-  plt.savefig(f"{FIG_DIR}/True vs. Predicted {model_name}_{variable_name}_{split_name}.png", dpi=300, bbox_inches="tight")
+  plt.title(f"True vs. Predicted {clean_filename(model_name)}_{variable_name}_{split_name}")
+
+  if fig_dir is not None:
+    plt.savefig(f"{Path(fig_dir)} / True vs. Predicted {clean_filename(model_name)}_{variable_name}_{split_name}.png", dpi=300, bbox_inches="tight")
+
   plt.show()
 
 def make_features(ECG, PPG):
     return np.concatenate([ECG, PPG], axis=1)
 
-def compute_bp_metrics(model_name, split_name, y_true, y_pred, train_time, n_epochs=None):
-    metrics = []
+def compute_bp_metrics(model_name, split_name, y_true, y_pred, train_time, n_epochs=None, metrics_path=None):
+    rows = []
 
     for j, target in enumerate(["SBP", "DBP"]):
         err = y_pred[:, j] - y_true[:, j]
 
-        metrics.append({
+        rows.append({
             "Model": model_name,
             "Split": split_name,
             "Variable": target,
@@ -47,14 +52,17 @@ def compute_bp_metrics(model_name, split_name, y_true, y_pred, train_time, n_epo
             "Number of epochs": n_epochs
         })
 
-    metrics.to_csv(
-        metrics_path,
-        mode="a",
-        header=not metrics_path.exists(),
-        index=False
-    )
+    metrics_df = pd.DataFrame(rows)
 
-    return pd.DataFrame(metrics)
+    if metrics_path is not None:
+        metrics_df.to_csv(
+            Path(metrics_path),
+            mode="a",
+            header=not metrics_path.exists(),
+            index=False,
+        )
+
+    return metrics_df
 
 class PulseDataset(Dataset):
     def __init__(self, ECG, PPG, df_labels):
@@ -70,15 +78,15 @@ class PulseDataset(Dataset):
         y = self.labels[idx]
         return torch.tensor(x), torch.tensor(y)
 
-def evaluate_loop(name, model, val_loader, loss_fn):
+def evaluate_loop(model, data_loader, loss_fn):
     model.eval()
     val_loss = 0
     with torch.no_grad():
-        for X, y in val_loader:
+        for X, y in data_loader:
             X, y = X.to(device), y.to(device)
             pred = model(X)
             val_loss += loss_fn(pred, y).item()*X.size(0)
-    val_loss /= len(val_loader.dataset)
+    val_loss /= len(data_loader.dataset)
     return val_loss
 
 def train_model(name, model, train_loader, val_loader, epochs=100, lr=0.001, loss_fn = nn.MSELoss()):
@@ -89,7 +97,7 @@ def train_model(name, model, train_loader, val_loader, epochs=100, lr=0.001, los
     best_val_loss = float('inf')
     patience = 10
     patience_counter = 0
-    tol = 0.0001
+    min_delta = 0.0001
     all_training_loss = []
     all_val_loss = []
     n_epochs = epochs
@@ -110,20 +118,21 @@ def train_model(name, model, train_loader, val_loader, epochs=100, lr=0.001, los
         all_training_loss.append(train_loss)
 
         # validation
-        val_loss = evaluate_loop(name, model, val_loader, loss_fn)
+        val_loss = evaluate_loop(model, val_loader, loss_fn)
         all_val_loss.append(val_loss)
 
         # early stopping
-        if best_val_loss - val_loss >= tol:
+        if best_val_loss - val_loss >= min_delta:
           best_val_loss = val_loss
           patience_counter = 0
           torch.save(model.state_dict(), "best_model.pt")
         else:
           patience_counter += 1
           if patience_counter >= patience:
-            n_epochs = epoch+1 - patience
             break
     end = time.time()
+
+    n_epochs = len(all_training_loss)
     model.load_state_dict(torch.load("best_model.pt"))
 
     return model, end - start, n_epochs, all_training_loss, all_val_loss
@@ -166,15 +175,15 @@ def evaluate_model(name, model_class, train_loader, val_loader, test_loader, tes
 # fully connected autoencoder (AE)
 from src.models import FCAutoencoder
 
-def evaluate_loop_AE(model, val_loader, loss_fn = nn.MSELoss()):
+def evaluate_loop_AE(model, data_loader, loss_fn = nn.MSELoss()):
     model.eval()
     val_loss = 0
     with torch.no_grad():
-        for (X,) in val_loader:
+        for (X,) in data_loader:
             X = X.to(device)
             pred = model(X)
             val_loss += loss_fn(pred, X).item()*X.size(0)
-    val_loss /= len(val_loader.dataset)
+    val_loss /= len(data_loader.dataset)
     return val_loss
 
 def train_model_AE(model, train_loader, epochs=100, lr=0.001, loss_fn = nn.MSELoss()):
@@ -218,7 +227,7 @@ def train_model_AE(model, train_loader, epochs=100, lr=0.001, loss_fn = nn.MSELo
 
 def elbow_AE(latent_list, ABP_loader, ABP_org):
   results = []
-  ABP_gen = {}
+  ABP_recon = {}
 
   for ld in latent_list:
       # print("Training AE with latent dimension:", ld)
@@ -239,9 +248,9 @@ def elbow_AE(latent_list, ABP_loader, ABP_org):
 
           x_rec = trained_model(x0).cpu().squeeze(0).numpy()  # remove batch dim
 
-          ABP_gen[ld] = {
+          ABP_recon[ld] = {
               "latent_dim": ld,
-              "generated": x_rec
+              "reconstruction": x_rec
           }
 
-  return results, ABP_gen
+  return results, ABP_recon
