@@ -20,9 +20,9 @@ This project uses the PulseDB dataset, a cleaned cardiovascular waveform dataset
 
 Reference paper:
 
-Wang, W., Mohseni, P., Kilgore, K. L., & Najafizadeh, L.  
-*PulseDB: A large, cleaned dataset based on MIMIC-III and VitalDB for benchmarking cuff-less blood pressure estimation methods.*  
-Frontiers in Digital Health, 2022.  
+Wang, W., Mohseni, P., Kilgore, K. L., & Najafizadeh, L.
+*PulseDB: A large, cleaned dataset based on MIMIC-III and VitalDB for benchmarking cuff-less blood pressure estimation methods.*
+Frontiers in Digital Health, 2022.
 https://doi.org/10.3389/fdgth.2022.1090854
 
 The dataset contains ECG, PPG, and arterial blood pressure (ABP) waveform segments, together with subject-level metadata and reference SBP/DBP values.
