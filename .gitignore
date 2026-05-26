@@ -9,3 +9,4 @@ __pycache__/
 *.mat
 *.npy
 .DS_Store
+notebooks/documentation_and_github.ipynb
