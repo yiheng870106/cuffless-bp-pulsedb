@@ -90,22 +90,6 @@ class RNN(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, d_model=64, nhead=4, num_layers=2):
         super().__init__()
-        self.pos_emb = nn.Parameter(torch.randn(1, 1250, d_model))
-        self.input_fc = nn.Linear(2, d_model)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True)
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.fc = nn.Linear(d_model, 2)
-    def forward(self, x):
-        x = x.transpose(1,2)          # (B, seq_len, channels)
-        x = self.input_fc(x) + self.pos_emb
-        x = self.transformer(x)       # [B, seq_len, d_model]
-        x = x.mean(dim=1)
-        # x = x[-1,:,:]                 # last timestep
-        return self.fc(x)
-
-class Transformer(nn.Module):
-    def __init__(self, d_model=64, nhead=4, num_layers=2):
-        super().__init__()
 
         self.downsample = nn.Sequential(
             nn.Conv1d(2, d_model, kernel_size=9, stride=5, padding=4),
@@ -152,3 +136,68 @@ class FCAutoencoder(nn.Module):
         z = self.encode(x)
         x_rec = self.decode(z)
         return x_rec
+
+def conv_block(in_channels, out_channels, kernel_size, stride):
+    padding = kernel_size // 2
+
+    return nn.Sequential(
+        nn.Conv1d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding),
+        nn.BatchNorm1d(out_channels),
+        nn.ReLU(),
+    )
+
+class ConvGRU(nn.Module):
+    def __init__(self, hidden_size=64, num_layers=1, dropout=0.0):
+        super().__init__()
+
+        self.feature_extractor = nn.Sequential(
+            conv_block(2, 32, 9, 2),
+            conv_block(32, 64, 9, 2),
+            conv_block(64, 64, 9, 2),
+        )
+
+        rnn_dropout = dropout if num_layers > 1 else 0.0
+
+        self.gru = nn.GRU(input_size=64, hidden_size=hidden_size, num_layers=num_layers, batch_first=True, dropout=rnn_dropout)
+
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_size, 64),
+            nn.ReLU(),
+            nn.Linear(64, 2),
+        )
+
+    def forward(self, x):
+        x = self.feature_extractor(x)
+        x = x.transpose(1, 2)
+
+        _, hn = self.gru(x)
+
+        return self.fc(hn[-1])
+
+class ConvLSTM(nn.Module):
+    def __init__(self, hidden_size=64, num_layers=1, dropout=0.0):
+        super().__init__()
+
+        self.feature_extractor = nn.Sequential(
+            conv_block(2, 32, 9, 2),
+            conv_block(32, 64, 9, 2),
+            conv_block(64, 64, 9, 2),
+        )
+
+        rnn_dropout = dropout if num_layers > 1 else 0.0
+
+        self.lstm = nn.LSTM(input_size=64, hidden_size=hidden_size, num_layers=num_layers, batch_first=True, dropout=rnn_dropout)
+
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_size, 64),
+            nn.ReLU(),
+            nn.Linear(64, 2),
+        )
+
+    def forward(self, x):
+        x = self.feature_extractor(x)     # (batch, 64, shorter_length)
+        x = x.transpose(1, 2)             # (batch, shorter_length, 64)
+
+        _, (hn, _) = self.lstm(x)
+
+        return self.fc(hn[-1])
