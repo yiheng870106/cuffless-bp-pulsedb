@@ -27,7 +27,7 @@ def plot_true_vs_pred(test, pred, model_name, split_name, variable_name, fig_dir
   plt.title(f"True vs. Predicted {clean_filename(model_name)}_{variable_name}_{split_name}")
 
   if fig_dir is not None:
-    plt.savefig(f"{Path(fig_dir)} / True vs. Predicted {clean_filename(model_name)}_{variable_name}_{split_name}.png", dpi=300, bbox_inches="tight")
+    plt.savefig(f"{Path(fig_dir)}/True_vs._Predicted_{clean_filename(model_name)}_{variable_name}_{split_name}.png", dpi=300, bbox_inches="tight")
 
   plt.show()
 
